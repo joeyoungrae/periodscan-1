@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>방송 목록</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        .scan {
+            display: flex;
+            align-items: center;
+        }
+        .notification-toggle {
+            margin: 10px 0;
+        }
+        .category {
+            margin: 20px 0;
+        }
+        .broadcast {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        .scan-animation {
+            margin-left: 10px;
+            font-size: 1.5em;
+            animation: dot-blink 1s infinite;
+        }
+
+        @keyframes dot-blink {
+            0%, 100% { content: ''; }
+            20% { content: '.'; }
+            40% { content: '..'; }
+            60% { content: '...'; }
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: #2196F3;
+        }
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="scan">
+        SCAN 중<span class="scan-animation">.</span><span class="scan-animation">.</span><span class="scan-animation">.</span>
+    </div>
+    <div id="lastUpdate"></div>
+    <div>
+        <label class="toggle-switch">
+            <input type="checkbox" id="notificationToggle">
+            <span class="slider"></span>
+        </label>
+        <span>알림 켜기/끄기</span>
+    </div>
+    <div>
+        <span id="filter">전체</span>
+        <span id="count">0개</span>
+    </div>
+
+    <div class="category">
+        <button onclick="changeFilter('chizz')">치지직</button>
+        <button onclick="changeFilter('soop')">숲</button>
+        <button onclick="changeFilter('all')">전체보기</button>
+    </div>
+    <div id="stream_lists">
+        <span id="no_stream" style="display: block">검색 결과가 없습니다.</span>
+    </div>
+
+    <script>
+        let isNotificationOn = true;
+        let streams = new Map();
+        let filter = "all";
+        const streamLists = document.querySelector("#stream_lists");
+        const spanCount = document.querySelector("#count");
+        const spanFilter = document.querySelector("#filter");
+        let newStreamsCount = 0;
+
+        let notificationsEnabled = localStorage.getItem('notificationsEnabled') === 'true';
+
+        const notificationToggle = document.getElementById('notificationToggle');
+        notificationToggle.checked = notificationsEnabled;
+
+        notificationToggle.addEventListener('change', function() {
+            notificationsEnabled = this.checked;
+            localStorage.setItem('notificationsEnabled', notificationsEnabled);
+            if (notificationsEnabled && Notification.permission !== "granted") {
+                Notification.requestPermission();
+                localStorage.setItem('notificationsEnabled', false);
+                notificationsEnabled = false;
+            }
+        });
+
+        function showNotification(message) {
+            if (notificationsEnabled && Notification.permission === "granted") {
+                new Notification("새로운 방송 알림", { body: message });
+            }
+        }
+        
+        function fetchData() {
+
+            fetch('/api/live-streams')
+                .then(response => response.json())
+                .then(data => {            
+                    
+                    const newStream = new Map();
+
+                    data.forEach(result => {
+                        if (!streams.has(result['channel_id'])) {
+                            newStreamsCount += 1;
+                        }
+                        //streams.set(result['channel_id'], result);
+                        newStream.set(result['channel_id'], result);
+                    });
+
+
+                    // 
+                    for (let [key, value] of streams) {
+                        if (!newStream.has(key)) {  // mapB에 해당 키가 없으면
+                            const div = document.querySelector(`#stream-${key}`);
+                            if (div) {
+                                div.remove();
+                            }
+                        }
+                      }
+
+                    streams = newStream;
+                    
+                    const now = new Date();
+                    const lastUpdateTimes = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+                    document.getElementById('lastUpdate').textContent = `마지막 업데이트: ${lastUpdateTimes}`;
+                    updateLists(false);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+        }
+
+        fetchData();
+        setInterval(fetchData, 60000);
+
+        function updateLists(isRefresh = false) {                        
+
+            if (isRefresh) {
+                streamLists.innerHTML = ``;
+                const span = document.createElement("span");    
+                span.id = "no_stream";
+                span.innerHTML = `검색 결과가 없습니다.`;
+                span.style.display = "none";
+                streamLists.appendChild(span);
+            } else {
+                document.querySelector("#no_stream").style.display = "none";
+            }
+
+            let count = 0;
+
+            streams.forEach((value, key) => {
+
+                if (filter === "soop" && value["platform"] !== "soop") {
+                    return;
+                } else if (filter === "chizz" && value["platform"] !== "chizz") {                    
+                    return;
+                }
+
+                count += 1;
+                
+                let div = document.querySelector(`#stream-${key}`);
+
+                if (!div) {
+                    div = document.createElement("div");                
+                    div.classList = `broadcast`;
+                    div.id = `stream-${key}`;
+                    streamLists.appendChild(div);
+                }
+
+                div.innerHTML = `<p>발견시각: <span id="timestamp">${value["time"]}</span></p>
+                    <p>플랫폼: <span id="platform">${convert(value["platform"])}</span></p>
+                    <img src="${value["channelImageurl"]}" alt="채널 이미지" width="50" height="50">
+                    <strong>${value["channelName"]}</strong>
+                    <p>방송 제목: <strong>${value["title"]}</strong></p>
+                    <a href="${value["url"]}" target="_blank">시청하기</a>
+                    <p>${value["url"]} <button onclick="copyToClipBoard('${key}')">방송정보 복사하기</button> <button onclick="copyToClipOnlyUrl('${key}')">주소만 복사하기</button></p>
+                    <button onclick="warning('#${key}_${value["channelName"]}')">부적절한 채널 신고하기</button>`;
+            });
+
+            spanCount.innerHTML = `${count}개`;
+
+            if (newStreamsCount > 0) {
+                showNotification(`${newStreamsCount}개의 새로운 방송이 시작되었습니다!`);
+                newStreamsCount = 0;
+            }
+
+            // 데이터가 없으면 없다고 표시하기
+            if (streamLists.children.length <= 1) {
+                document.querySelector("#no_stream").style.display = "block";
+            }
+        }
+
+        function copyToClipBoard(key) {       
+            if (key === "all") {
+                // 전체 복사하기
+                return;
+            }
+            
+            const stream = streams.get(key);
+            const copyText = `플랫폼:${convert(stream["platform"])}\n채널명:${stream["channelName"]}\n제목:${stream["title"]}\n링크:${stream["url"]}`;       
+
+            navigator.clipboard.writeText(copyText)
+                .then(() => {
+                    alert('복사되었습니다!');
+                })
+                .catch(err => {
+                    alert('복사에 실패했습니다.');
+                });
+        };    
+        
+        function copyToClipOnlyUrl(key) {       
+            if (key === "all") {
+                return;
+            }
+            
+            const stream = streams.get(key);
+            const copyText = `${stream["url"]}`;       
+
+            navigator.clipboard.writeText(copyText)
+                .then(() => {
+                    alert('복사되었습니다!');
+                })
+                .catch(err => {
+                    alert('복사에 실패했습니다.');
+                });
+        }; 
+
+        function changeFilter(platform) {
+            if (platform === "soop" || platform === "chizz") {
+                filter = platform;
+            } else {
+                filter = "all";
+            }
+
+            spanFilter.innerHTML = convert(filter);
+            updateLists(true);           
+        }
+
+        function convert(platform) {
+            if (platform === "soop") {
+                return "숲";
+            } else if (platform === "chizz") {
+                return "치지직";
+            } else if (platform === "all") {
+                return "전체";
+            }
+        }
+
+
+        function warning(channelId) {
+            fetch('/api/warning', {
+                method: 'POST', // 요청 방법
+                headers: {
+                    'Content-Type': 'application/json' // 요청 본문의 데이터 형식
+                },
+                body: JSON.stringify({ channel_id: channelId }) // JSON 형태로 변환하여 본문에 추가
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('네트워크 응답이 좋지 않습니다.');
+                }
+                return response.json(); // 응답을 JSON으로 변환
+            })
+            .then(data => {
+                alert("부적절한 채널 신고했습니다.\n확인 후 빠른 시일내에 블랙리스트에 추가하겠습니다.\n감사합니다.") // 서버의 응답 데이터 처리
+            })
+            .catch(error => {
+                console.error('요청에 실패하셨습니다. :', error); // 오류 처리
+            });
+        }
+    </script>
+
+</body>
+</html>
